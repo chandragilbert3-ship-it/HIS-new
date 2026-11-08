@@ -10,18 +10,19 @@ if (!can('emr.view')) {
 
 $id   = (int) ($_GET['id'] ?? 0);
 $img  = $id > 0 ? rad_image_for_view($id) : null;
-$path = $img ? rad_image_path((string) $img['image_uri']) : null;
-if ($img === null || $path === null) {
+$uri   = $img ? (string) $img['image_uri'] : '';
+$bytes = $img ? rad_image_bytes($uri) : null;
+if ($img === null || $bytes === null) {
     http_response_code(404);
     exit('Gambar tidak ditemukan.');
 }
 
 audit_log('Lihat gambar radiologi #' . $id, 'rad_images', $id, (int) $img['visit_id']);
 
-$ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+$ext  = strtolower(pathinfo($uri, PATHINFO_EXTENSION));
 header('Content-Type: ' . ($ext === 'png' ? 'image/png' : 'image/jpeg'));
-header('Content-Length: ' . (string) filesize($path));
+header('Content-Length: ' . (string) strlen($bytes));
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: private, max-age=300');
-readfile($path);
-exit;
+echo $bytes;
+exit;

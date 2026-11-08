@@ -24,6 +24,16 @@ function rad_report_status_labels(): array
     return ['draft' => ['Draft', 'cp-warn'], 'final' => ['Final', 'cp-ok']];
 }
 
+/**
+ * Simpan gambar di database (tabel rad_image_blobs) alih-alih di folder storage?
+ * Aktif jika Environment Variable STORAGE_DRIVER=db (wajib di Vercel, karena
+ * file yang ditulis ke disk di Vercel tidak permanen).
+ */
+function rad_storage_in_db(): bool
+{
+    return env('STORAGE_DRIVER') === 'db';
+}
+
 /** Folder penyimpanan gambar (dibuat otomatis, dengan .htaccess penolak akses langsung). */
 function rad_storage_root(): string
 {
@@ -311,9 +321,9 @@ function rad_store_image(int $itemId, array $file, int $userId): ?string
     $meta['original']    = mb_substr($orig, 0, 100);
     $meta['uploaded_by'] = $userId;
 
-    $root = rad_storage_root();
+    $inDb = rad_storage_in_db();
     $name = bin2hex(random_bytes(16)) . '.' . $ext;
-    $dest = $root . '/radiology/' . $name;
+    $dest = $inDb ? '' : rad_storage_root() . '/radiology/' . $name;
 
     $pdo = db();
     $pdo->beginTransaction();
@@ -341,12 +351,24 @@ function rad_store_image(int $itemId, array $file, int $userId): ?string
             $pdo->rollBack();
             return 'Maksimal ' . RAD_MAX_IMAGES . ' gambar per pemeriksaan.';
         }
-        if (!move_uploaded_file($tmp, $dest)) {
-            $pdo->rollBack();
-            return 'Gagal menyimpan berkas. Periksa izin folder storage.';
+        if ($inDb) {
+            $bytes = file_get_contents($tmp);
+            if ($bytes === false) {
+                $pdo->rollBack();
+                return 'Gagal membaca berkas unggahan.';
+            }
+            $blob = $pdo->prepare('INSERT INTO rad_image_blobs (image_uri, data) VALUES (:u, :d)');
+            $blob->bindValue(':u', 'radiology/' . $name);
+            $blob->bindValue(':d', $bytes, PDO::PARAM_LOB);
+            $blob->execute();
+        } else {
+            if (!move_uploaded_file($tmp, $dest)) {
+                $pdo->rollBack();
+                return 'Gagal menyimpan berkas. Periksa izin folder storage.';
+            }
+            $moved = true;
+            @chmod($dest, 0640);
         }
-        $moved = true;
-        @chmod($dest, 0640);
         $pdo->prepare('INSERT INTO rad_images (order_item_id, image_uri, metadata, created_at) VALUES (:i, :u, :m, :t)')
             ->execute([':i' => $itemId, ':u' => 'radiology/' . $name, ':m' => json_encode($meta, JSON_UNESCAPED_UNICODE), ':t' => date('Y-m-d H:i:s')]);
         $pdo->commit();
@@ -383,6 +405,26 @@ function rad_image_path(string $uri): ?string
     }
     $path = rad_storage_root() . '/' . $uri;
     return is_file($path) ? $path : null;
+}
+
+/** Isi (bytes) gambar untuk sebuah image_uri, dari database atau folder storage; null bila tidak ada. */
+function rad_image_bytes(string $uri): ?string
+{
+    if (!preg_match('#^radiology/[a-f0-9]{32}\.(jpg|png)$#', $uri)) {
+        return null;
+    }
+    if (rad_storage_in_db()) {
+        $stmt = db()->prepare('SELECT data FROM rad_image_blobs WHERE image_uri = :u');
+        $stmt->execute([':u' => $uri]);
+        $data = $stmt->fetchColumn();
+        return $data === false ? null : (string) $data;
+    }
+    $path = rad_image_path($uri);
+    if ($path === null) {
+        return null;
+    }
+    $data = file_get_contents($path);
+    return $data === false ? null : $data;
 }
 
 /** Validasi isi laporan. Hasil: [data, errors]. */
@@ -497,4 +539,4 @@ function rad_visit_reports(int $visitId): array
         $r['image_ids'] = $by[(int) $r['order_item_id']] ?? [];
     }
     return $rows;
-}
+}
