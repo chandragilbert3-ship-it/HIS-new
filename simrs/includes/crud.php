@@ -346,7 +346,14 @@ function crud_input_html(string $name, array $f, mixed $value, string $mode, ?ar
             }
             $html .= '</select>';
             if (!$options) {
-                $html .= '<div class="hint warn">Belum ada pilihan yang tersedia.</div>';
+                if ($name === 'user_id') {
+                    $html .= '<div class="hint warn">Belum ada akun yang bisa dipilih: semua akun berperan Dokter/Radiografer sudah terdaftar. '
+                           . 'Untuk menambah dokter baru, buat dulu akun pengguna dengan peran <b>Dokter</b> di modul Autentikasi'
+                           . (function_exists('can') && can('auth.create') ? ' (<a href="' . e(url('modules/auth/form.php')) . '">buat akun sekarang</a>)' : '')
+                           . ', lalu kembali ke halaman ini.</div>';
+                } else {
+                    $html .= '<div class="hint warn">Belum ada pilihan yang tersedia.</div>';
+                }
             }
             return $html;
 

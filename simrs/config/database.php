@@ -139,6 +139,53 @@ function db_auto_install(): void
 }
 
 /**
+ * Tambalan database (patches/*.sql): dijalankan satu kali per file, dicatat di system_config
+ * (kunci "patch.<nama file>"). Dipakai untuk perubahan data/hak akses setelah database terpasang.
+ * Kalau gagal, hanya dicatat ke log server dan aplikasi tetap berjalan.
+ */
+function db_apply_patches(PDO $pdo): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+    $dir = dirname(APP_ROOT) . '/patches';
+    if (!is_dir($dir)) {
+        return;
+    }
+    $files = glob($dir . '/*.sql') ?: [];
+    sort($files);
+    foreach ($files as $file) {
+        $key = 'patch.' . basename($file, '.sql');
+        try {
+            $st = $pdo->prepare('SELECT COUNT(*) FROM system_config WHERE config_key = :k');
+            $st->execute([':k' => $key]);
+            if ((int) $st->fetchColumn() > 0) {
+                continue;
+            }
+            $buf = '';
+            foreach (preg_split('/\r?\n/', (string) file_get_contents($file)) as $line) {
+                $t = trim($line);
+                if ($buf === '' && ($t === '' || str_starts_with($t, '--'))) {
+                    continue;
+                }
+                $buf .= $line . "\n";
+                if (str_ends_with(rtrim($line), ';')) {
+                    $pdo->exec($buf);
+                    $buf = '';
+                }
+            }
+            $ins = $pdo->prepare("INSERT IGNORE INTO system_config (config_key, config_value) VALUES (:k, 'applied')");
+            $ins->execute([':k' => $key]);
+            error_log('SIMRS: tambalan ' . basename($file) . ' diterapkan.');
+        } catch (Throwable $e) {
+            error_log('SIMRS: tambalan ' . basename($file) . ' gagal: ' . $e->getMessage());
+        }
+    }
+}
+
+/**
  * Mengembalikan koneksi PDO (dibuat sekali, lalu dipakai ulang).
  */
 function db(): PDO
@@ -169,6 +216,8 @@ function db(): PDO
         http_response_code(500);
         exit('Koneksi database gagal. Pastikan database berjalan dan pengaturan koneksi (config/database.php atau Environment Variables) benar.');
     }
+
+    db_apply_patches($pdo);
 
     return $pdo;
 }
