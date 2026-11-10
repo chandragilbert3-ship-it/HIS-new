@@ -60,7 +60,7 @@ function ed_active_cases(): array
     return db()->query($sql)->fetchAll();
 }
 
-/** Kunjungan IGD (2 hari terakhir) yang belum dibuka kasusnya. */
+/** Kunjungan IGD aktif yang belum dibuka kasusnya. */
 function ed_unopened_visits(): array
 {
     $stmt = db()->prepare(
@@ -69,11 +69,10 @@ function ed_unopened_visits(): array
            FROM visits v
            JOIN patients p ON p.patient_id = v.patient_id
           WHERE v.service_type = 'emergency' AND v.status IN ('registered','in_progress')
-            AND v.visit_date >= :sejak
             AND NOT EXISTS (SELECT 1 FROM ed_encounters e WHERE e.visit_id = v.visit_id)
           ORDER BY v.visit_id"
     );
-    $stmt->execute([':sejak' => date('Y-m-d', strtotime('-2 days'))]);
+    $stmt->execute();
     return $stmt->fetchAll();
 }
 

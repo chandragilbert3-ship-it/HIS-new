@@ -105,7 +105,7 @@ function cpoe_current_doctor(): ?array
 }
 
 /**
- * Kunjungan aktif (7 hari terakhir) untuk dipilih dokter.
+ * Kunjungan aktif (status terdaftar / sedang dilayani) untuk dipilih dokter.
  * $semua = false: hanya pasien milik dokter ini atau yang belum punya dokter.
  */
 function cpoe_active_visits(string $q, bool $semua, ?int $doctorId, int $limit = 30): array
@@ -119,9 +119,8 @@ function cpoe_active_visits(string $q, bool $semua, ?int $doctorId, int $limit =
               JOIN master_polyclinics mp ON mp.polyclinic_id = v.polyclinic_id
               LEFT JOIN master_doctors md ON md.doctor_id = v.doctor_id
               LEFT JOIN queue q           ON q.visit_id = v.visit_id
-             WHERE v.status IN ('registered','in_progress')
-               AND v.visit_date >= :sejak";
-    $params = [':sejak' => date('Y-m-d', strtotime('-7 days'))];
+             WHERE v.status IN ('registered','in_progress')";
+    $params = [];
 
     if (!$semua) {
         $sql .= ' AND (v.doctor_id IS NULL OR v.doctor_id = :dok)';
