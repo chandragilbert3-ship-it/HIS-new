@@ -291,3 +291,27 @@ function sch_list_appointments(string $from, string $to, string $status, string 
     $stmt->execute();
     return [$stmt->fetchAll(), $total];
 }
+/**
+ * Appointment hari ini yang belum check-in (status 'booked').
+ * $doctorId != null => hanya appointment milik dokter itu.
+ */
+function sch_today_booked(?int $doctorId): array
+{
+    $sql = "SELECT a.appointment_id, a.booking_code, p.patient_id, p.no_rm, p.nama_pasien,
+                   s.doctor_id, d.doctor_name, mp.polyclinic_name, s.start_time, s.end_time
+              FROM appointments a
+              JOIN patients p            ON p.patient_id = a.patient_id
+              JOIN master_schedules s    ON s.schedule_id = a.schedule_id
+              JOIN master_doctors d      ON d.doctor_id = s.doctor_id
+              JOIN master_polyclinics mp ON mp.polyclinic_id = s.polyclinic_id
+             WHERE a.status = 'booked' AND a.appointment_date = :tgl";
+    $params = [':tgl' => date('Y-m-d')];
+    if ($doctorId !== null) {
+        $sql .= ' AND s.doctor_id = :dok';
+        $params[':dok'] = $doctorId;
+    }
+    $sql .= ' ORDER BY s.start_time, a.appointment_id';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
