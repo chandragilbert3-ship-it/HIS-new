@@ -484,3 +484,65 @@ function bl_claim_move(int $claimId, string $to): ?string
         return null;
     });
 }
+
+/**
+ * Tarik layanan dari order kunjungan yang sudah selesai ke tagihan draft:
+ * tes lab & radiologi (status order selesai) dan obat (resep sudah diserahkan).
+ * Tarif dicari lewat kode: LAB-nn, RAD-nn, OBAT-nn (lihat patches/004).
+ * Hasil: [error|null, jumlah baris ditambahkan, daftar layanan tanpa tarif].
+ */
+function bl_import_orders(int $invoiceId): array
+{
+    $added = 0;
+    $missing = [];
+    $err = bl_tx(function (PDO $pdo) use ($invoiceId, &$added, &$missing) {
+        $inv = bl_lock($pdo, $invoiceId);
+        if (!$inv || $inv['invoice_status'] !== 'draft') {
+            return 'Layanan hanya dapat ditarik ke tagihan berstatus Draft.';
+        }
+        $st = $pdo->prepare(
+            "SELECT oi.order_item_id, oi.item_type, oi.lab_test_id, oi.rad_test_id, oi.drug_id,
+                    COALESCE((SELECT pi.quantity FROM prescription_items pi WHERE pi.order_item_id = oi.order_item_id LIMIT 1), 1) AS qty
+               FROM order_items oi
+               JOIN orders o ON o.order_id = oi.order_id
+              WHERE o.visit_id = :v AND o.status = 'completed' AND oi.item_type IN ('lab','radiology','drug')
+              ORDER BY oi.order_item_id"
+        );
+        $st->execute([':v' => (int) $inv['visit_id']]);
+        $rows = $st->fetchAll();
+
+        $exists = $pdo->prepare("SELECT COUNT(*) FROM billing_invoice_items WHERE invoice_id = :i AND source_module = 'order' AND source_item_id = :s");
+        $tar    = $pdo->prepare('SELECT tariff_id, ROUND(amount * 100) AS amount_c FROM master_tariffs WHERE service_code = :c AND is_active = 1 ORDER BY tariff_id LIMIT 1');
+        $ins    = $pdo->prepare("INSERT INTO billing_invoice_items (invoice_id, source_module, source_item_id, tariff_id, quantity, subtotal) VALUES (:i, 'order', :s, :t, :q, :sub)");
+
+        foreach ($rows as $r) {
+            $exists->execute([':i' => $invoiceId, ':s' => (int) $r['order_item_id']]);
+            if ((int) $exists->fetchColumn() > 0) {
+                continue;
+            }
+            if ($r['item_type'] === 'lab') {
+                $code = 'LAB-' . str_pad((string) (int) $r['lab_test_id'], 2, '0', STR_PAD_LEFT);
+            } elseif ($r['item_type'] === 'radiology') {
+                $code = 'RAD-' . str_pad((string) (int) $r['rad_test_id'], 2, '0', STR_PAD_LEFT);
+            } else {
+                $code = 'OBAT-' . str_pad((string) (int) $r['drug_id'], 2, '0', STR_PAD_LEFT);
+            }
+            $tar->execute([':c' => $code]);
+            $t = $tar->fetch();
+            if (!$t) {
+                $missing[] = $code;
+                continue;
+            }
+            $qtyC = max(1, (int) round((float) $r['qty'] * 100));
+            $subC = (int) round(((int) $t['amount_c']) * $qtyC / 100);
+            $ins->execute([
+                ':i' => $invoiceId, ':s' => (int) $r['order_item_id'], ':t' => (int) $t['tariff_id'],
+                ':q' => number_format($qtyC / 100, 2, '.', ''), ':sub' => number_format($subC / 100, 2, '.', ''),
+            ]);
+            $added++;
+        }
+        bl_recalc_gross($pdo, $invoiceId);
+        return null;
+    });
+    return [$err, $added, $missing];
+}
