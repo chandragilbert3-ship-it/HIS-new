@@ -476,7 +476,8 @@ function inv_items_list(string $q): array
                    d.drug_id, d.drug_name, d.dosage_form, d.strength, d.is_active AS drug_active,
                    COALESCE((SELECT SUM(sb.quantity_on_hand) FROM stock_batches sb WHERE sb.inventory_item_id = ii.inventory_item_id), 0) AS on_hand
               FROM inventory_items ii
-              LEFT JOIN master_drugs d ON d.drug_id = (SELECT MIN(d2.drug_id) FROM master_drugs d2 WHERE d2.inventory_item_id = ii.inventory_item_id)';
+              LEFT JOIN (SELECT inventory_item_id, MIN(drug_id) AS first_drug_id FROM master_drugs GROUP BY inventory_item_id) md1 ON md1.inventory_item_id = ii.inventory_item_id
+              LEFT JOIN master_drugs d ON d.drug_id = md1.first_drug_id';
     $p = [];
     $q = trim($q);
     if ($q !== '') {
@@ -494,7 +495,8 @@ function inv_find_item(int $id): ?array
         'SELECT ii.inventory_item_id, ii.item_code, ii.item_name, ii.category, ii.unit, ii.min_stock, ii.max_stock,
                 d.drug_id, d.drug_name, d.dosage_form, d.strength, d.is_active AS drug_active
            FROM inventory_items ii
-           LEFT JOIN master_drugs d ON d.drug_id = (SELECT MIN(d2.drug_id) FROM master_drugs d2 WHERE d2.inventory_item_id = ii.inventory_item_id)
+           LEFT JOIN (SELECT inventory_item_id, MIN(drug_id) AS first_drug_id FROM master_drugs GROUP BY inventory_item_id) md1 ON md1.inventory_item_id = ii.inventory_item_id
+              LEFT JOIN master_drugs d ON d.drug_id = md1.first_drug_id
           WHERE ii.inventory_item_id = :id'
     );
     $stmt->execute([':id' => $id]);
