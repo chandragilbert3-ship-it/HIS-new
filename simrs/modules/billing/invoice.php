@@ -29,6 +29,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $err = $qty === null ? 'Jumlah tidak valid.' : bl_add_item($id, (int) ($_POST['tariff_id'] ?? 0), $qty);
             $ok  = $err === null ? ['Tambah layanan tarif #' . (int) $_POST['tariff_id'] . ' ke tagihan ' . $inv['invoice_no'], 'Layanan ditambahkan.'] : null;
             break;
+        case 'import_orders':
+            require_permission('billing.update');
+            [$err, $nAdded, $nMissing] = bl_import_orders($id);
+            $pesan = $nAdded > 0 ? $nAdded . ' layanan ditarik dari order kunjungan.' : 'Tidak ada layanan baru (order lab/radiologi harus berstatus selesai dan obat sudah diserahkan).';
+            if ($nMissing) {
+                $pesan .= ' Dilewati karena belum ada tarif: ' . implode(', ', array_unique($nMissing)) . ' (tambahkan di Master Data > Tarif).';
+            }
+            $ok  = $err === null ? ['Tarik ' . $nAdded . ' layanan dari order ke tagihan ' . $inv['invoice_no'], $pesan] : null;
+            break;
         case 'remove_item':
             require_permission('billing.update');
             $err = bl_remove_item($id, (int) ($_POST['item_id'] ?? 0));
@@ -134,6 +143,10 @@ bl_tabs('index');
   </table></div>
 
   <?php if ($draft && can('billing.update')): ?>
+  <form method="post" action="<?= e(url($back)) ?>" class="toolbar">
+    <?= csrf_field() ?><input type="hidden" name="invoice_id" value="<?= $id ?>"><input type="hidden" name="do" value="import_orders">
+    <button type="submit" class="btn btn-primary">⬇ Tarik dari Order Kunjungan (Lab, Radiologi, Obat)</button>
+  </form>
   <form method="post" action="<?= e(url($back)) ?>" class="toolbar">
     <?= csrf_field() ?><input type="hidden" name="invoice_id" value="<?= $id ?>"><input type="hidden" name="do" value="add_item">
     <select name="tariff_id" required>
